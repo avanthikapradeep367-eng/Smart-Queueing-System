@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QuickServe Canteen - Order Online</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Load qrcode.js for QR code generation -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <style>
+        /* Set custom font and default background */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f7f9fb;
+        }
+        /* Custom scrollbar for menu/cart on desktop */
+        .scrollable-content {
+            max-height: 70vh;
+            overflow-y: auto;
+        }
+        /* Animation for payment success */
+        @keyframes pulse-success {
+            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+            70% { transform: scale(1); box-shadow: 0 0 0 10px rgba(16, 185, 129, 0); }
+            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+        }
+        .animate-pulse-success {
+            animation: pulse-success 2s infinite;
+        }
+    </style>
+</head>
+<body class="min-h-screen">
+
+    <div id="app" class="max-w-7xl mx-auto p-4 md:p-8">
+        <!-- Header -->
+        <header class="text-center mb-8">
+            <h1 class="text-4xl font-extrabold text-gray-900 flex items-center justify-center">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 text-green-600 mr-3" viewBox="0 0 20 20" fill="currentColor">
+                    <path d="M5 3a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2V5a2 2 0 00-2-2H5zM5 11a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2v-2a2 2 0 00-2-2H5zM11 5a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V5zM11 13a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+                </svg>
+                Smart Queueing
+            </h1>
+            <p class="text-gray-500 mt-1">Order ahead and skip the queue!</p>
+        </header>
+
+        <!-- Main Content -->
+        <div id="content-container">
+        </div>
+
+    </div>
+
+    <!-- JavaScript Logic -->
+    <script type="text/javascript">
+        
+        let currentStep = 'menu'; 
+        let cart = {};
+        let totalAmount = 0;
+        let orderCode = null;
+        let userId = 'USER-A1B2C3D4'; // Mock user ID
+
+        // Mock Menu Data (PRICES UPDATED TO INDIAN RUPEES - INR)
+        const menuItems = [
+            { id: 'Pani Puri', name: 'Pani Puri', price: 60.00, description: 'Fried Puri stuffed with masala potato and tangy water' },
+            { id: 'Choco Lava Cake', name: 'Choco Lava Cake', price: 40.00, description: 'Dense and Decadent chocolate cake with chocolate stuffing.' },
+            { id: 'soda', name: 'Soda Can (330ml)', price: 20.00, description: 'Choose from Cola, Lemon, or Diet.' },
+            { id: 'fries', name: 'Crispy Fries', price: 60.00, description: 'Golden, salted, served with ketchup and Mayo.' },
+            { id: 'coffee', name: 'Cold Coffee', price: 60.00, description: 'Freshly brewed black coffee.' },
+            { id: 'Bun', name: 'Chilli Bun', price: 30.00, description: 'A savoury bun flavoured with chilli flakes.' },
+            { id: 'Veg Puff', name: 'Veg Puff', price: 20.00, description: 'Crispy and flaky pastry with veg stuffing.' },
+            { id: 'Panner Puff', name: 'Panner Puff', price: 25.00, description: 'Crispy and flaky pastry with Paneer stuffing.' },
+            { id: 'Egg Puff', name: 'Egg Puff', price: 30.00, description: 'Crispy and flaky pastry with egg stuffing.' },
+            { id: 'Chicken Puff', name: 'Chicken Puff', price: 40.00, description: 'Crispy and flaky pastry with Chicken stuffing.' },
+        ];
+
+        // --- Main Content ---
+        const findMenuItem = (id) => menuItems.find(item => item.id === id);
+
+        /**
+         * Updating global cart state and recalculates the total.
+         */
+        const updateCartAndTotal = () => {
+            totalAmount = 0;
+            for (const id in cart) {
+                const item = findMenuItem(id);
+                if (item) {
+                    totalAmount += item.price * cart[id].quantity;
+                }
+            }
+            // Round to 2 decimal places
+            totalAmount = Math.round(totalAmount * 100) / 100;
+        };
+
+        
+        const updateCartItem = (itemId, delta) => {
+            const item = findMenuItem(itemId);
+            if (!item) return;
+
+            if (!cart[itemId]) {
+                cart[itemId] = {
+                    name: item.name,
+                    price: item.price,
+                    quantity: 0
+                };
+            }
+
+            cart[itemId].quantity += delta;
+
+            if (cart[itemId].quantity <= 0) {
+                delete cart[itemId];
+            }
+
+            updateCartAndTotal();
+            render(); 
+        };
+
+        /**
+         * Generates a unique, time-limited order code.
+         */
+        const generateOrderCode = () => {
+            const timestamp = Date.now();
+            const randomSuffix = Math.random().toString(36).substring(2, 6).toUpperCase();
+            // Format: QSC-TIMESTAMP-RANDOM-USERID
+            return `QSC-${Math.floor(timestamp / 1000)}-${randomSuffix}-${userId}`;
+        };
+
+        /**
+         * Clears the cart and resets the step.
+         */
+        const resetOrder = () => {
+            cart = {};
+            totalAmount = 0;
+            orderCode = null;
+            currentStep = 'menu';
+            render();
+        };
+
+        /**
+         * Generates summary of the items in the cart.
+         */
+        const generateOrderSummaryText = () => {
+            const items = Object.keys(cart).map(id => {
+                const item = cart[id];
+                return `${item.quantity} ${item.name}`;
+            });
+            return items.join(', ');
+        };
+
+
+        // --- Step Rendering Functions ---
+
+        /**
+         * Renders the Menu Selection and Cart Summary (Step 1).
+         */
+        const renderMenuStep = () => {
+            const container = document.getElementById('content-container');
+            
+            // 1. Menu Items Section
+            let menuHtml = menuItems.map(item => `
+                <div class="bg-white p-4 sm:p-6 rounded-xl shadow-md flex justify-between items-center transition duration-300 hover:shadow-lg">
+                    <div>
+                        <h3 class="text-lg font-semibold text-gray-800">${item.name}</h3>
+                        <p class="text-sm text-gray-500">${item.description}</p>
+                    </div>
+                    <div class="flex items-center space-x-3">
+                        <!-- CURRENCY SYMBOL CHANGED TO ₹ -->
+                        <span class="text-xl font-bold text-green-600 mr-4">₹${item.price.toFixed(2)}</span>
+                        <button onclick="updateCartItem('${item.id}', -1)" class="bg-red-100 text-red-600 p-2 rounded-full h-8 w-8 flex items-center justify-center text-lg font-bold hover:bg-red-200 transition duration-150" aria-label="Remove one">-</button>
+                        <span id="qty-${item.id}" class="w-6 text-center font-bold text-gray-700">${(cart[item.id] ? cart[item.id].quantity : 0)}</span>
+                        <button onclick="updateCartItem('${item.id}', 1)" class="bg-green-100 text-green-600 p-2 rounded-full h-8 w-8 flex items-center justify-center text-lg font-bold hover:bg-green-200 transition duration-150" aria-label="Add one">+</button>
+                    </div>
+                </div>
+            `).join('');
+
+            // 2. Cart Summary Section
+            let cartItemsHtml = Object.keys(cart).map(id => {
+                const item = cart[id];
+                return `
+                    <div class="flex justify-between items-center py-2 border-b last:border-b-0">
+                        <span class="text-sm text-gray-600">${item.name} x ${item.quantity}</span>
+                        <!-- CURRENCY SYMBOL CHANGED TO ₹ -->
+                        <span class="font-medium text-gray-800">₹${(item.price * item.quantity).toFixed(2)}</span>
+                    </div>
+                `;
+            }).join('');
+
+            if (cartItemsHtml === '') {
+                cartItemsHtml = '<p class="text-center text-gray-500 py-4">Your cart is empty. Start adding items!</p>';
+            }
+
+            container.innerHTML = `
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+                    <!-- Menu Column -->
+                    <div class="md:col-span-2">
+                        <h2 class="text-2xl font-bold text-gray-800 mb-4 border-b pb-2">Menu</h2>
+                        <div class="space-y-4 scrollable-content">
+                            ${menuHtml}
+                        </div>
+                    </div>
+
+                    <!-- Cart Column -->
+                    <div class="md:col-span-1 bg-white p-6 rounded-xl shadow-2xl sticky top-8 h-fit">
+                        <h2 class="text-2xl font-bold text-gray-800 mb-4 border-b pb-2">Your Order Summary</h2>
+                        <div class="space-y-3">
+                            ${cartItemsHtml}
+                        </div>
+                        
+                        <div class="mt-6 pt-4 border-t border-dashed">
+                            <div class="flex justify-between items-center text-xl font-extrabold text-gray-900">
+                                <span>Total:</span>
+                                <!-- CURRENCY SYMBOL CHANGED TO ₹ -->
+                                <span>₹${totalAmount.toFixed(2)}</span>
+                            </div>
+                        </div>
+
+                        <button id="checkoutBtn" onclick="goToPayment()" 
+                                ${totalAmount === 0 ? 'disabled' : ''}
+                                class="w-full mt-6 py-3 rounded-xl font-semibold text-white transition duration-200 
+                                ${totalAmount === 0 
+                                    ? 'bg-gray-400 cursor-not-allowed' 
+                                    : 'bg-green-600 hover:bg-green-700 shadow-lg shadow-green-200'}">
+                            Proceed to Payment
+                        </button>
+                        <p class="text-xs text-center text-gray-400 mt-2">No cash is handled at the counter. Payment must be completed online.</p>
+                    </div>
+                </div>
+            `;
+        };
+
+        /**
+         * Renders the Payment Simulation step (Step 2).
+         */
+        const renderPaymentStep = () => {
+            const container = document.getElementById('content-container');
+            container.innerHTML = `
+                <div class="max-w-xl mx-auto bg-white p-8 rounded-xl shadow-2xl">
+                    <h2 class="text-3xl font-bold text-gray-800 mb-6 text-center">Secure Checkout</h2>
+                    <!-- CURRENCY SYMBOL CHANGED TO ₹ -->
+                    <p class="text-center text-gray-600 mb-8">Total amount due: <span class="text-green-600 font-extrabold text-2xl">₹${totalAmount.toFixed(2)}</span></p>
+                    
+                    <!-- PAYMENT OPTIONS SECTION -->
+                    <div class="space-y-6">
+                        <h3 class="text-xl font-semibold text-gray-800 border-b pb-2">1. Digital Wallet / App Payments</h3>
+                        
+                        <!-- UPI/Wallet Buttons -->
+                        <div class="grid grid-cols-2 gap-4">
+                            <!-- GPay Button -->
+                            <button onclick="completePayment()" 
+                                    class="py-3 px-4 bg-white border border-gray-300 rounded-xl font-bold text-gray-800 flex items-center justify-center space-x-2 shadow-md hover:bg-gray-50 transition duration-150">
+                                <span class="text-lg font-extrabold text-blue-600">GPay</span>
+                            </button>
+                            
+                            <!-- PayTM Button -->
+                            <button onclick="completePayment()" 
+                                    class="py-3 px-4 bg-white border border-gray-300 rounded-xl font-bold text-gray-800 flex items-center justify-center space-x-2 shadow-md hover:bg-gray-50 transition duration-150">
+                                <span class="text-lg font-extrabold text-blue-800">Paytm</span>
+                            </button>
+                        </div>
+
+                        <!-- OR Separator -->
+                        <div class="relative">
+                             <div class="absolute inset-0 flex items-center" aria-hidden="true">
+                                <div class="w-full border-t border-gray-300"></div>
+                             </div>
+                             <div class="relative flex justify-center text-sm">
+                                <span class="bg-white px-2 text-gray-500">OR</span>
+                             </div>
+                        </div>
+
+                        <!-- UPI ID Input -->
+                        <div class="space-y-2">
+                            <h3 class="text-xl font-semibold text-gray-800 border-b pb-2">2. Pay via UPI ID</h3>
+                            <input type="text" id="upi-id" placeholder="yourname@bankupi" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-green-500 focus:border-green-500" value="quickserve@upi">
+                        </div>
+                        
+                        <!-- OR Separator -->
+                        <div class="relative">
+                             <div class="absolute inset-0 flex items-center" aria-hidden="true">
+                                <div class="w-full border-t border-gray-300"></div>
+                             </div>
+                             <div class="relative flex justify-center text-sm">
+                                <span class="bg-white px-2 text-gray-500">OR</span>
+                             </div>
+                        </div>
+
+                        <!-- Credit/Debit Card Input -->
+                        <div class="space-y-4">
+                            <h3 class="text-xl font-semibold text-gray-800 border-b pb-2">3. Credit/Debit Card</h3>
+                            <input type="text" placeholder="Card Number (XXXX XXXX XXXX XXXX)" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-green-500 focus:border-green-500" value="4111 **** **** 1234">
+                            <div class="flex space-x-4">
+                                <input type="text" placeholder="MM/YY" class="w-1/2 p-3 border border-gray-300 rounded-lg focus:ring-green-500 focus:border-green-500" value="12/26">
+                                <input type="text" placeholder="CVC" class="w-1/2 p-3 border border-gray-300 rounded-lg focus:ring-green-500 focus:border-green-500" value="123">
+                            </div>
+                            <input type="text" placeholder="Card Holder Name" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-green-500 focus:border-green-500" value="${userId}">
+                        </div>
+
+                        
+                        <!-- Combined Final Button (This button triggers the simulated payment via any method chosen) -->
+                        <button onclick="completePayment()" 
+                                class="w-full mt-8 py-4 bg-green-600 hover:bg-green-700 text-white font-bold rounded-xl shadow-xl transition duration-200">
+                            <!-- CURRENCY SYMBOL CHANGED TO ₹ -->
+                            <span id="payment-btn-text">Proceed to Pay ₹${totalAmount.toFixed(2)}</span>
+                        </button>
+
+                    </div>
+                    <!-- END PAYMENT OPTIONS SECTION -->
+
+                    <button onclick="currentStep = 'menu'; render();" 
+                            class="w-full mt-4 py-3 text-gray-600 hover:text-red-600 transition duration-200">
+                        Cancel and Go Back to Menu
+                    </button>
+                    <p class="text-xs text-center text-gray-400 mt-4">Note: This is a frontend simulation. The Java backend would integrate with payment gateways (like Razorpay) to handle the actual secure transactions for all these options.</p>
+                </div>
+            `;
+        };
+        
+        /**
+         * Simulates successful payment and moves to QR code generation (Step 3).
+         */
+        const completePayment = () => {
+            const paymentBtnText = document.getElementById('payment-btn-text');
+            paymentBtnText.textContent = 'Processing...';
+
+            // Simulate API call delay (2 seconds)
+            setTimeout(() => {
+                orderCode = generateOrderCode();
+                currentStep = 'qr';
+                render();
+            }, 2000);
+        };
+
+
+        /**
+         * Renders the QR Code Display step (Step 3).
+         */
+        const renderQrStep = () => {
+            const container = document.getElementById('content-container');
+            
+            // --- SIMPLIFIED PAYLOAD FOR QR CODE (MACHINE USE ONLY) ---
+            const collectionToken = Date.now(); // A security token/timestamp
+            const orderSummaryMachine = JSON.stringify({
+                id: orderCode,
+                token: collectionToken
+            });
+            // --- END SIMPLIFIED PAYLOAD ---
+
+            // --- HUMAN-READABLE SUMMARY ---
+            const humanReadableSummary = generateOrderSummaryText();
+            // --- END HUMAN-READABLE SUMMARY ---
+
+
+            container.innerHTML = `
+                <div class="max-w-xl mx-auto bg-white p-8 rounded-3xl shadow-2xl border-4 border-green-500 animate-pulse-success">
+                    <div class="text-center">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 text-green-600 mx-auto mb-4" viewBox="0 0 20 20" fill="currentColor">
+                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
+                        </svg>
+                        <h2 class="text-3xl font-extrabold text-green-600 mb-2">Payment Successful!</h2>
+                        <p class="text-sm text-red-500 mt-1 mb-4">This QR Code is valid for 2 hours for collection.</p>
+                        
+                        <!-- NEW HUMAN-READABLE SUMMARY -->
+                        <div class="p-4 bg-gray-100 rounded-xl text-left shadow-inner space-y-2">
+                            <p class="text-lg font-semibold text-gray-700">Foods: <span class="font-normal text-gray-900">${humanReadableSummary}</span></p>
+                            <p class="text-lg font-semibold text-gray-700">ID: <span class="font-normal text-gray-900 font-mono">${orderCode}</span></p>
+                            <p class="text-xs text-gray-400 pt-2">Total Amount Paid: ₹${totalAmount.toFixed(2)}</p>
+                        </div>
+                        <!-- END NEW HUMAN-READABLE SUMMARY -->
+                    </div>
+
+                    <!-- QR Code container -->
+                    <div id="qrcode-container" class="my-8 flex justify-center p-4 bg-gray-50 rounded-lg">
+                        <div id="qrcode" class="w-64 h-64"></div>
+                    </div>
+
+                    <p class="text-center text-gray-500 mb-6">Scan this code at the self-service machine to print your receipt.</p>
+        
+                    <button onclick="resetOrder()" class="w-full mt-4 py-3 text-sm text-gray-500 hover:text-red-500">
+                        Start New Order (For Demo)
+                    </button>
+                </div>
+            `;
+
+            // Initialize QR Code generator
+            setTimeout(() => {
+                new QRCode(document.getElementById("qrcode"), {
+                    text: orderSummaryMachine, // Use the minimal, machine-readable data
+                    width: 256,
+                    height: 256,
+                    colorDark : "#000000",
+                    colorLight : "#ffffff",
+                    correctLevel : QRCode.CorrectLevel.H
+                });
+            }, 100);
+        };
+
+      
+        const simulateScan = (orderData) => {
+            // In a real system, the scanner reads this string, sends it to the Java backend.
+            
+            // 1. Scanner parses the minimal data
+            const parsedData = JSON.parse(orderData);
+            const scannedOrderId = parsedData.id; 
+            const scannedToken = parsedData.token; 
+
+            // 2. Java Backend uses scannedOrderId and scannedToken to look up 
+            // the full order details (cart, total, expiry status).
+            
+            // Mock the backend validation/receipt generation using the globally stored cart for this demo
+            const receiptDetails = {
+                orderId: scannedOrderId,
+                collectionTime: new Date().toLocaleString(),
+                items: Object.keys(cart).map(id => ({
+                    name: cart[id].name,
+                    qty: cart[id].quantity,
+                    unitPrice: cart[id].price,
+                    subtotal: (cart[id].price * cart[id].quantity).toFixed(2)
+                })),
+                total: totalAmount.toFixed(2),
+                customer: userId
+            };
+
+            currentStep = 'receipt';
+            renderReceiptStep(receiptDetails);
+        };
+
+        /**
+         * Renders the final Receipt step (Step 5).
+         * @param {object} receiptDetails - The receipt object generated after scan simulation.
+         */
+        const renderReceiptStep = (receiptDetails) => {
+            const container = document.getElementById('content-container');
+            
+            let itemsHtml = receiptDetails.items.map(item => `
+                <div class="flex justify-between text-sm py-1">
+                    <span class="w-1/2">${item.name} (x${item.qty})</span>
+                    <!-- CURRENCY SYMBOL CHANGED TO ₹ -->
+                    <span class="w-1/4 text-right">₹${item.unitPrice.toFixed(2)}</span>
+                    <span class="w-1/4 text-right font-medium">₹${item.subtotal}</span>
+                </div>
+            `).join('');
+
+            container.innerHTML = `
+                <div class="max-w-md mx-auto bg-white p-6 md:p-10 rounded-xl shadow-2xl">
+                    <div class="text-center border-b pb-4 mb-4 border-dashed border-gray-300">
+                        <h2 class="2xl font-bold text-gray-800">OFFICIAL RECEIPT</h2>
+                        <p class="text-sm text-gray-500 mt-1">QuickServe Canteen - Receipt Kiosk</p>
+                    </div>
+                    
+                    <div class="space-y-1 text-sm mb-4">
+                        <p><strong>Order ID:</strong> ${receiptDetails.orderId}</p>
+                        <p><strong>Customer ID:</strong> ${receiptDetails.customer}</p>
+                        <p><strong>Time of Collection:</strong> ${receiptDetails.collectionTime}</p>
+                    </div>
+
+                    <div class="border-y border-dashed py-3 mb-4">
+                        <div class="flex justify-between text-xs font-bold text-gray-600 mb-1">
+                            <span class="w-1/2">ITEM</span>
+                            <span class="w-1/4 text-right">UNIT PR.</span>
+                            <span class="w-1/4 text-right">SUBTOTAL</span>
+                        </div>
+                        ${itemsHtml}
+                    </div>
+
+                    <div class="flex justify-between text-xl font-extrabold text-gray-900 pt-2">
+                        <span>GRAND TOTAL</span>
+                        <!-- CURRENCY SYMBOL CHANGED TO ₹ -->
+                        <span>₹${receiptDetails.total}</span>
+                    </div>
+
+                    <p class="text-center text-green-600 font-semibold mt-6 text-lg">
+                        Please present this receipt to the staff for quick order collection.
+                    </p>
+                    <p class="text-center text-xs text-gray-400 mt-2">
+                        Thank you for using QuickServe!
+                    </p>
+
+                    <button onclick="resetOrder()" class="w-full mt-6 py-3 bg-green-600 hover:bg-green-700 text-white font-bold rounded-xl transition duration-200">
+                        Start New Order
+                    </button>
+                </div>
+            `;
+        };
+
+        // --- Navigation Controller ---
+
+        /**
+         * Renders the appropriate step based on the current state.
+         */
+        const render = () => {
+            switch (currentStep) {
+                case 'menu':
+                    renderMenuStep();
+                    break;
+                case 'payment':
+                    renderPaymentStep();
+                    break;
+                case 'qr':
+                    renderQrStep();
+                    break;
+                case 'receipt':
+                    // This is called from simulateScan, not directly from render() switch
+                    break;
+                default:
+                    currentStep = 'menu';
+                    renderMenuStep();
+            }
+        };
+        
+        /**
+         * Move from menu to payment step.
+         */
+        const goToPayment = () => {
+            if (totalAmount > 0) {
+                currentStep = 'payment';
+                render();
+            } else {
+                // IMPORTANT: Replaced alert() with a console log or a custom message box in a real app
+                console.error('Please add items to your cart before proceeding to payment.');
+                // For this demo, since we cannot use custom message boxes in this environment, 
+                // we'll leave the alert as a placeholder for the user to understand the logic.
+                alert('Please add items to your cart before proceeding to payment.');
+            }
+        };
+
+
+        // Initialize the application on page load
+        window.onload = () => {
+            render();
+        };
+
+    </script>
+</body>
+</html>
